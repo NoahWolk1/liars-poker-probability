@@ -42,6 +42,9 @@ const HAND_TYPES = [
 export default function Home() {
   const [cardsInput, setCardsInput] = useState("As Kh");
   const [numPlayers, setNumPlayers] = useState(4);
+  const [extraCards, setExtraCards] = useState(0);
+  const [usePerPlayer, setUsePerPlayer] = useState(false);
+  const [perPlayerCounts, setPerPlayerCounts] = useState("2, 2, 2, 2");
   const [handClaimed, setHandClaimed] = useState("three_of_a_kind");
   const [primaryRank, setPrimaryRank] = useState("J");
   const [secondaryRank, setSecondaryRank] = useState("6");
@@ -54,7 +57,12 @@ export default function Home() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const boardSize = 2 * numPlayers;
+  const boardSize = usePerPlayer
+    ? (() => {
+        const parts = perPlayerCounts.split(/[,\s]+/).filter(Boolean).map((s) => parseInt(s, 10));
+        return parts.every((n) => !isNaN(n) && n >= 0) ? parts.reduce((a, b) => a + b, 0) : 2 * numPlayers;
+      })()
+    : 2 * numPlayers + extraCards;
   const currentHand = HAND_TYPES.find((h) => h.value === handClaimed)!;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,10 +78,19 @@ export default function Home() {
         .filter(Boolean)
         .map((c) => c.trim());
       if (cards.length === 0) {
-        throw new Error("Enter your 2 hole cards");
+        throw new Error("Enter at least one card");
       }
-      if (cards.length !== 2) {
-        throw new Error("Liar's Poker uses exactly 2 cards per player");
+      if (boardSize < cards.length) {
+        throw new Error("Pool size must be at least your number of cards");
+      }
+      if (usePerPlayer) {
+        const parts = perPlayerCounts.split(/[,\s]+/).filter(Boolean).map((s) => parseInt(s, 10));
+        if (parts.length !== numPlayers || parts.some((n) => isNaN(n) || n < 0)) {
+          throw new Error("Enter valid card counts for each player (comma-separated)");
+        }
+        if (parts[0] !== cards.length) {
+          throw new Error(`Your card count (${parts[0]}) must match your cards (${cards.length})`);
+        }
       }
 
       const body: Record<string, unknown> = {
@@ -128,7 +145,7 @@ export default function Home() {
           <div className="space-y-6">
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-600">
-                Your 2 hole cards
+                Your hole cards
               </label>
               <input
                 type="text"
@@ -138,7 +155,7 @@ export default function Home() {
                 className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 font-mono text-slate-800 placeholder-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
               />
               <p className="mt-1.5 text-xs text-slate-500">
-                Rank + Suit (e.g. As, 10h, Kh). Two cards.
+                Rank + Suit (e.g. As 10h Kh). Start with 2; add a card each time you lose.
               </p>
             </div>
 
@@ -151,13 +168,74 @@ export default function Home() {
                 min={2}
                 max={26}
                 value={numPlayers}
-                onChange={(e) => setNumPlayers(Math.max(2, parseInt(e.target.value, 10) || 2))}
+                onChange={(e) => {
+                  const n = Math.max(2, parseInt(e.target.value, 10) || 2);
+                  setNumPlayers(n);
+                  if (usePerPlayer) {
+                    const parts = perPlayerCounts.split(/[,\s]+/).filter(Boolean);
+                    const base = parts.slice(0, n).map((p, i) => parts[i] ?? "2");
+                    while (base.length < n) base.push("2");
+                    setPerPlayerCounts(base.join(", "));
+                  }
+                }}
                 className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
               />
-              <p className="mt-1.5 text-xs text-slate-500">
-                {boardSize} cards in the pool (2 per player)
-              </p>
             </div>
+
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={usePerPlayer}
+                onChange={(e) => {
+                  setUsePerPlayer(e.target.checked);
+                  if (e.target.checked) {
+                    const yourCount = cardsInput.trim().split(/\s+/).filter(Boolean).length || 2;
+                    const others = Array(numPlayers - 1).fill("2").join(", ");
+                    setPerPlayerCounts(`${yourCount}, ${others}`);
+                  }
+                }}
+                className="rounded border-slate-300"
+              />
+              <span className="text-sm font-medium text-slate-600">
+                Specify cards per player (for accuracy)
+              </span>
+            </label>
+
+            {usePerPlayer ? (
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">
+                  Cards per player (you first)
+                </label>
+                <input
+                  type="text"
+                  value={perPlayerCounts}
+                  onChange={(e) => setPerPlayerCounts(e.target.value)}
+                  placeholder="3, 2, 2, 2"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 font-mono text-slate-800 placeholder-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Comma-separated. First = you (must match your cards). +1 per loss.
+                  {boardSize > 0 && ` ${boardSize} cards total.`}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-600">
+                  Extra cards in pool (from losses)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={52}
+                  value={extraCards}
+                  onChange={(e) => setExtraCards(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  +1 per loss (loser gets another card). {boardSize} cards total in pool.
+                </p>
+              </div>
+            )}
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-600">
@@ -270,9 +348,10 @@ export default function Home() {
         <div className="mt-10 rounded-xl bg-black/20 p-5 text-green-100/90">
           <h3 className="mb-2 font-semibold text-white">Rules</h3>
           <p className="text-sm leading-relaxed">
-            Each player gets 2 hole cards. Players bid poker hands they believe exist in
-            the collective pool. Call &quot;bluff&quot; on the previous bid: if the hand exists,
-            the challenger loses; if it doesn&apos;t, the bidder loses.
+            Each player starts with 2 hole cards. Players bid poker hands they believe
+            exist in the collective pool. Call &quot;bluff&quot; on the previous bid: if the hand
+            exists, the challenger loses; if it doesn&apos;t, the bidder loses. The loser gets
+            another card (+1 to their hand and the pool).
           </p>
         </div>
       </div>
